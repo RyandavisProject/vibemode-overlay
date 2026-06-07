@@ -60,7 +60,7 @@ def compact_plan_status(value: str | None) -> str:
 
 
 class UsageOverlay:
-    WIDTH = 260
+    WIDTH = 300
     HEIGHT = 70
     MIN_REFRESH_SECONDS = 60
     INTERVAL_CHOICES_MINUTES = (1, 2, 3, 5, 10, 15)
@@ -324,8 +324,8 @@ class UsageOverlay:
         self._text(10, y + 1, label, "#9aa8ba", 9, "normal", family=self.UI_FONT)
         self._text(40, y, "остаток", "#667386", 8, "normal", family=self.UI_FONT)
         self._text(110, y - 1, value, "#ffb86b", 11, "normal", family=self.TEXT_FONT)
-        self._text(250, y + 2, reset, "#8793a4", 8, "normal", "ne", family=self.UI_FONT)
-        self._progress(40, y + 17, 208, None)
+        self._text(290, y + 2, reset, "#8793a4", 8, "normal", "ne", family=self.UI_FONT)
+        self._progress(40, y + 17, 248, None)
 
     def _render(self) -> None:
         self.canvas.delete("all")
@@ -341,8 +341,9 @@ class UsageOverlay:
         else:
             self._text(68, 7, self.status_text, "#697386", 8, "normal", family=self.UI_FONT)
 
-        self._rounded_rect(222, 5, 254, 21, 5, "#161d28", "#25303b", tags="interval")
-        self._text(238, 13, f"{self.interval_minutes}м", "#9aa4b5", 8, "normal", "center", tags="interval", family=self.UI_FONT)
+        self._text(218, 7, self.status_text, "#697386", 8, "normal", "ne", family=self.UI_FONT)
+        self._rounded_rect(262, 5, 294, 21, 5, "#161d28", "#25303b", tags="interval")
+        self._text(278, 13, f"{self.interval_minutes}м", "#9aa4b5", 8, "normal", "center", tags="interval", family=self.UI_FONT)
 
         self._draw_limit_row(25, "5ч", self._window_by_index(0))
         self._draw_limit_row(47, "7д", self._window_by_index(1))
