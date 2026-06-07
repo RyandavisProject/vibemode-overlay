@@ -84,6 +84,28 @@ class UsageParserTest(unittest.TestCase):
         self.assertEqual(snapshot.windows[1].credits_remaining, 331_363_335)
         self.assertEqual(snapshot.windows[1].reset_text, "1 д 20 ч")
 
+    def test_parse_dynamic_plan_name(self):
+        text = """
+        КАБИНЕТ КЛИЕНТА
+        Лимиты
+        Оплата
+        Рефералы
+        КАБИНЕТ КЛИЕНТА
+        Лимиты
+        Подробная информация о Вашем тарифе
+        Обновить
+        pro max
+        активен ещё 10 д
+        5 часов
+        Сброс через 4 ч 56 мин
+        118 755 192
+        Кредитов осталось
+        """
+
+        snapshot = parse_usage_text(text)
+
+        self.assertEqual(snapshot.account, "pro max")
+
 
 if __name__ == "__main__":
     unittest.main()

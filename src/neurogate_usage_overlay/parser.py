@@ -8,6 +8,21 @@ from .models import UsageSnapshot, UsageWindow
 
 NUMBER_RE = re.compile(r"\d[\d \t\u00a0]*")
 WINDOW_TITLES = ("5 часов", "24 часа", "7 дней")
+PLAN_SKIP_LINES = {
+    "лимиты",
+    "обновить",
+    "кабинет клиента",
+    "подробная информация о вашем тарифе",
+}
+PLAN_STOP_LINES = {
+    "модель",
+    "платный сброс",
+    "история",
+    "использовано",
+    "токены",
+    "кеш",
+    "кэш",
+}
 
 
 def parse_int(value: str | None) -> int | None:
@@ -71,6 +86,34 @@ def _extract_segment(text: str, start_label: str, next_labels: tuple[str, ...]) 
     return text[start.start() : end_index]
 
 
+def _parse_plan_name(text: str) -> str | None:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    marker_index = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if "подробная информация о вашем тарифе" in line.lower()
+        ),
+        None,
+    )
+    if marker_index is None:
+        marker_index = next((index for index, line in enumerate(lines) if line.lower() == "лимиты"), None)
+    if marker_index is not None:
+        for candidate in lines[marker_index + 1 : marker_index + 8]:
+            cleaned = candidate.strip()
+            candidate_key = cleaned.lower()
+            if candidate_key in PLAN_SKIP_LINES:
+                continue
+            if candidate_key.startswith("активен ещё") or candidate_key.startswith("активен еще"):
+                continue
+            if candidate_key in PLAN_STOP_LINES:
+                break
+            if re.fullmatch(r"\d+\s*(usdt|usd|\$)?", candidate_key):
+                continue
+            return cleaned
+    return None
+
+
 def _parse_window(title: str, segment: str) -> UsageWindow | None:
     if not segment:
         return None
@@ -96,9 +139,7 @@ def parse_usage_text(text: str, source_url: str | None = None) -> UsageSnapshot:
         raw_text=normalized,
     )
 
-    account_match = re.search(r"\bascend\b", normalized, flags=re.IGNORECASE)
-    if account_match:
-        snapshot.account = account_match.group(0)
+    snapshot.account = _parse_plan_name(normalized)
 
     model_match = re.search(r"МОДЕЛЬ\s+([^\n\r]+)", normalized, flags=re.IGNORECASE)
     if model_match:

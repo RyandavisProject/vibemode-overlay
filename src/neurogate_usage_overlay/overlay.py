@@ -97,7 +97,7 @@ class UsageOverlay:
         self.menu_window: tk.Toplevel | None = None
 
         self.root = tk.Tk()
-        self.root.title("NeuroGate API 1.0")
+        self.root.title("NeuroGate API 1.1")
         self.root.geometry(self._initial_geometry())
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
@@ -415,8 +415,16 @@ class UsageOverlay:
         self._rounded_rect(x, y, x + width, y + 3, 2, "#242932")
         if percent is None:
             return
-        fill_width = max(4, min(width, int(width * max(0.0, min(1.0, percent / 100)))))
-        self._rounded_rect(x, y, x + fill_width, y + 3, 2, "#76a8ff")
+        fill_width = min(width, max(0, int(width * max(0.0, min(1.0, percent / 100)))))
+        if fill_width > 0:
+            self._rounded_rect(x, y, x + fill_width, y + 3, 2, "#76a8ff")
+
+    def _window_progress_percent(self, window: UsageWindow | None) -> float | None:
+        if not window:
+            return None
+        if window.progress_percent is not None:
+            return window.progress_percent
+        return window.limit_percent
 
     def _window_by_index(self, index: int) -> UsageWindow | None:
         if not self.last_snapshot:
@@ -441,12 +449,13 @@ class UsageOverlay:
         label = self._compact_window_title(window, fallback_label)
         value = format_credits(window.display_value if window else None)
         reset = compact_reset_text(window.reset_text if window else None)
+        percent = self._window_progress_percent(window)
 
         self._text(9, y, label, "#9aa8ba", 9, "normal", family=self.UI_FONT)
         self._text(31, y, "остаток", "#667386", 8, "normal", family=self.UI_FONT)
         self._text(124, y + 8, value, "#ffb86b", 10, "bold", "center", family=self.NUMBER_FONT)
         self._text(214, y + 2, reset, "#8793a4", 8, "normal", "ne", family=self.UI_FONT)
-        self._progress(30, y + 17, 184, None)
+        self._progress(30, y + 17, 184, percent)
 
     def _render(self) -> None:
         self.canvas.delete("all")

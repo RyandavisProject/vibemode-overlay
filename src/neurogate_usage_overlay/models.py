@@ -13,6 +13,7 @@ class UsageWindow:
     limit_total: int | None = None
     credits_remaining: int | None = None
     reset_text: str | None = None
+    progress_percent: float | None = None
 
     @property
     def limit_percent(self) -> float | None:

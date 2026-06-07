@@ -1,4 +1,4 @@
-﻿# NeuroGate API 1.0
+﻿# NeuroGate API 1.1
 
 Compact Windows overlay for NeuroGate API usage limits.
 
@@ -7,11 +7,9 @@ Chrome profile and shows a small always-on-top desktop widget with the current
 credit limits. By default the browser window is hidden after login. A visible
 Chrome window opens only when the user needs to log in again.
 
-## Screenshots
+## Screenshot
 
 ![NeuroGate Overlay](docs/screenshots/overlay.png)
-
-![NeuroGate Overlay menu](docs/screenshots/overlay-menu.png)
 
 ## Current UI
 
@@ -23,6 +21,7 @@ available on the page:
 - tariff time remaining;
 - 5-hour credit balance;
 - 7-day credit balance;
+- portal-matched progress bars for each limit window;
 - reset time for each window;
 - last refresh status;
 - refresh interval.
@@ -209,7 +208,6 @@ neurogate-overlay/
     PUBLISHING.md
     screenshots/
       overlay.png
-      overlay-menu.png
   tests/
     test_browser_reader.py
     test_overlay.py

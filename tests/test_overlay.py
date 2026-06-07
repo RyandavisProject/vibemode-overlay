@@ -55,6 +55,37 @@ class OverlayPositionTest(unittest.TestCase):
         )
 
 
+class OverlayProgressTest(unittest.TestCase):
+    def test_window_progress_prefers_site_percent(self):
+        overlay = UsageOverlay.__new__(UsageOverlay)
+        window = UsageWindow(
+            title="5 часов",
+            credits_remaining=118_000_000,
+            limit_used=1_000_000,
+            limit_total=120_000_000,
+            progress_percent=1.25,
+        )
+
+        self.assertEqual(overlay._window_progress_percent(window), 1.25)
+
+    def test_window_progress_falls_back_to_used_total_pair(self):
+        overlay = UsageOverlay.__new__(UsageOverlay)
+
+        self.assertEqual(
+            overlay._window_progress_percent(UsageWindow(title="7 дней", limit_used=300_000_000, limit_total=600_000_000)),
+            50.0,
+        )
+
+    def test_zero_progress_does_not_draw_blue_fill(self):
+        overlay = UsageOverlay.__new__(UsageOverlay)
+        calls = []
+        overlay._rounded_rect = lambda *args, **_kwargs: calls.append(args)
+
+        overlay._progress(30, 42, 184, 0)
+
+        self.assertEqual(len(calls), 1)
+
+
 class OverlayRenderTest(unittest.TestCase):
     def test_login_state_renders_single_centered_message(self):
         overlay = UsageOverlay(lambda: UsageSnapshot(updated_at=datetime.now()))

@@ -1,7 +1,9 @@
 import unittest
+from datetime import datetime
 from unittest.mock import patch
 
 from neurogate_usage_overlay.browser_reader import BrowserSettings, NeurogateUsageReader
+from neurogate_usage_overlay.models import UsageSnapshot, UsageWindow
 
 
 class BrowserReaderModeTest(unittest.TestCase):
@@ -101,6 +103,20 @@ class BrowserReaderModeTest(unittest.TestCase):
         self.assertFalse(snapshot.has_data)
         self.assertFalse(snapshot.is_cached)
         self.assertEqual(snapshot.status_note, "нужен вход")
+
+    def test_attach_window_progress_clamps_site_percent(self):
+        reader = NeurogateUsageReader(BrowserSettings())
+        reader._page = object()
+        reader._extract_window_progress = lambda: [{"percent": 1.4}, {"percent": 150}]  # type: ignore[method-assign]
+        snapshot = UsageSnapshot(
+            updated_at=datetime.now(),
+            windows=[UsageWindow(title="5 С‡Р°СЃРѕРІ"), UsageWindow(title="7 РґРЅРµР№")],
+        )
+
+        reader._attach_window_progress(snapshot)
+
+        self.assertEqual(snapshot.windows[0].progress_percent, 1.4)
+        self.assertEqual(snapshot.windows[1].progress_percent, 100.0)
 
 
 if __name__ == "__main__":

@@ -189,10 +189,12 @@ class NeurogateUsageReader:
                     self._open_visible_login_window()
                     text = self._wait_for_usage_text()
         snapshot = parse_usage_text(text, source_url=self._page.url)
+        self._attach_window_progress(snapshot)
         if not snapshot.windows and not self._is_login_text(text):
             self._expand_usage_card(force=True)
             text = self._wait_for_usage_text()
             snapshot = parse_usage_text(text, source_url=self._page.url)
+            self._attach_window_progress(snapshot)
         if snapshot.has_data:
             self._login_visible = False
             self._hide_visible_browser_after_success()
@@ -297,6 +299,122 @@ class NeurogateUsageReader:
         )
         self._page.wait_for_timeout(900)
 
+    def _attach_window_progress(self, snapshot: UsageSnapshot) -> None:
+        if not snapshot.windows or not self._page:
+            return
+        try:
+            progress_items = self._extract_window_progress()
+        except Exception:
+            return
+        if not progress_items:
+            return
+        for index, window in enumerate(snapshot.windows):
+            if index >= len(progress_items):
+                break
+            percent = progress_items[index].get("percent")
+            if isinstance(percent, (int, float)):
+                window.progress_percent = max(0.0, min(100.0, float(percent)))
+
+    def _extract_window_progress(self) -> list[dict[str, float | str]]:
+        assert self._page is not None
+        return self._page.evaluate(
+            """() => {
+                const labels = ["5 часов", "24 часа", "7 дней"];
+
+                const normalize = (value) => (value || "")
+                    .replace(/\\s+/g, " ")
+                    .trim()
+                    .toLowerCase();
+
+                const colorParts = (color) => {
+                    const match = String(color).match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/i);
+                    return match ? match.slice(1, 4).map(Number) : null;
+                };
+
+                const isBlueFill = (element) => {
+                    const rgb = colorParts(getComputedStyle(element).backgroundColor);
+                    if (!rgb) return false;
+                    const [r, g, b] = rgb;
+                    return b > 150 && g > 90 && b > r + 45;
+                };
+
+                const percentFromAria = (element) => {
+                    const raw = element.getAttribute("aria-valuenow") || element.getAttribute("value");
+                    if (!raw) return null;
+                    const parsed = Number(String(raw).replace(",", "."));
+                    return Number.isFinite(parsed) ? parsed : null;
+                };
+
+                const percentFromStyle = (element) => {
+                    const styleWidth = element.style && element.style.width;
+                    if (styleWidth && styleWidth.includes("%")) {
+                        const parsed = Number(styleWidth.replace("%", "").replace(",", "."));
+                        if (Number.isFinite(parsed)) return parsed;
+                    }
+                    return null;
+                };
+
+                const percentFromGeometry = (element) => {
+                    const rect = element.getBoundingClientRect();
+                    const parentRect = element.parentElement && element.parentElement.getBoundingClientRect();
+                    if (!parentRect || parentRect.width <= 0 || rect.width < 0) return null;
+                    return (rect.width / parentRect.width) * 100;
+                };
+
+                const readPercent = (element) => {
+                    const candidates = [
+                        percentFromAria(element),
+                        percentFromStyle(element),
+                        percentFromGeometry(element),
+                    ];
+                    for (const value of candidates) {
+                        if (Number.isFinite(value)) {
+                            return Math.max(0, Math.min(100, value));
+                        }
+                    }
+                    return null;
+                };
+
+                const findCard = (label) => {
+                    const candidates = Array.from(document.body.querySelectorAll("div, section, article, [role='button']"))
+                        .filter((element) => {
+                            const text = normalize(element.innerText);
+                            if (!text.includes(label)) return false;
+                            return text.includes("кредитов осталось") || text.includes("лимиты тарифа");
+                        })
+                        .map((element) => {
+                            const rect = element.getBoundingClientRect();
+                            return { element, area: rect.width * rect.height };
+                        })
+                        .filter((item) => item.area > 1000)
+                        .sort((a, b) => a.area - b.area);
+                    return candidates[0] && candidates[0].element;
+                };
+
+                return labels.map((label) => {
+                    const card = findCard(label);
+                    if (!card) return null;
+                    const cardRect = card.getBoundingClientRect();
+                    const fills = Array.from(card.querySelectorAll("*"))
+                        .filter((element) => {
+                            const rect = element.getBoundingClientRect();
+                            if (rect.width < 1 || rect.height < 2 || rect.height > 18) return false;
+                            if (rect.top < cardRect.top + cardRect.height * 0.45) return false;
+                            return isBlueFill(element);
+                        })
+                        .map((element) => ({
+                            element,
+                            percent: readPercent(element),
+                            width: element.getBoundingClientRect().width,
+                        }))
+                        .filter((item) => Number.isFinite(item.percent))
+                        .sort((a, b) => b.width - a.width);
+                    if (!fills.length) return null;
+                    return { title: label, percent: fills[0].percent };
+                }).filter(Boolean);
+            }"""
+        )
+
     def _fallback_status(self, text: str) -> str:
         if "EMAIL" in text or "Connect Codex" in text:
             return "нужен вход"
@@ -306,7 +424,8 @@ class NeurogateUsageReader:
         try:
             self.settings.debug_log.parent.mkdir(parents=True, exist_ok=True)
             windows = "; ".join(
-                f"{item.title} rem={item.credits_remaining} used={item.limit_used}/{item.limit_total}"
+                f"{item.title} rem={item.credits_remaining} "
+                f"used={item.limit_used}/{item.limit_total} progress={item.progress_percent}"
                 for item in snapshot.windows
             )
             line = (
