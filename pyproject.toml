@@ -3,8 +3,8 @@ requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "neurogate-api"
-version = "0.1.0"
+name = "neurogate-overlay"
+version = "1.0.0"
 description = "Small Windows always-on-top overlay for NeuroGate API usage limits."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -27,10 +27,11 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/RyandavisProject/neurogate-api"
-Issues = "https://github.com/RyandavisProject/neurogate-api/issues"
+Homepage = "https://github.com/RyandavisProject/neurogate-overlay"
+Issues = "https://github.com/RyandavisProject/neurogate-overlay/issues"
 
 [project.scripts]
+neurogate-overlay = "neurogate_usage_overlay.__main__:main"
 neurogate-api = "neurogate_usage_overlay.__main__:main"
 vibemode-overlay = "neurogate_usage_overlay.__main__:main"
 neurogate-usage-overlay = "neurogate_usage_overlay.__main__:main"

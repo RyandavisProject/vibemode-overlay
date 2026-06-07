@@ -39,12 +39,12 @@ run-overlay.ps1
 - launches a persistent local Chrome profile;
 - prefers hidden browser mode after login;
 - opens a visible Chrome window only when the saved session requires login;
-- closes the visible Chrome window after a successful read and returns to hidden
-  mode;
+- hides the visible Chrome window after a successful read and continues from the
+  same local browser session;
 - exposes a runtime `keep_browser_open` toggle for the overlay menu;
 - waits for the dynamic usage page to expose both limit cards;
-- falls back to the last good snapshot if the site is temporarily logged out or
-  still loading;
+- reports login or missing-data states directly instead of showing old saved
+  values;
 - writes local debug logs only.
 
 ### Parser
@@ -56,18 +56,6 @@ run-overlay.ps1
 - supports the current `5 часов / 7 дней` credit-balance layout;
 - avoids parsing the paid-reset card as a limit card.
 
-### Projection
-
-`src/neurogate_usage_overlay/projection.py`
-
-- parses compact Russian duration strings such as `2 д 19 ч`;
-- estimates how many credits can still be spent before the current tariff
-  expires;
-- combines the 5-hour pacing limit with the 7-day aggregate limit;
-- adds future 7-day capacity only for full 7-day periods before the current
-  tariff expires;
-- returns the lower value because both limits apply at the same time.
-
 ### Overlay UI
 
 `src/neurogate_usage_overlay/overlay.py`
@@ -76,7 +64,8 @@ run-overlay.ps1
 - keeps refresh rate at one minute or slower;
 - is draggable from any area;
 - uses a custom borderless menu instead of the native Windows menu;
-- lets the user temporarily keep or close the visible account page.
+- lets the user temporarily keep or hide the visible account page;
+- saves the overlay window position locally and restores it on the next launch.
 
 ## Data Boundaries
 

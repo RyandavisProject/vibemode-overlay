@@ -21,10 +21,10 @@ It parses the values needed for the desktop overlay:
 The browser is hidden by default after login. If the saved browser session is
 expired, the app opens a visible Chrome window so the user can log in directly
 on the NeuroGate website. After a successful read, that visible window
-is closed and later updates continue in hidden mode.
+is hidden and later updates continue from the same local browser session.
 
 The user can temporarily keep the account page visible with the `Не закрывать ЛК`
-menu toggle. Turning the toggle off closes the visible Chrome window and returns
+menu toggle. Turning the toggle off hides the visible Chrome window and returns
 the app to hidden mode. This does not change the privacy boundary: the app still
 uses the local Chrome profile and does not collect credentials.
 
@@ -48,10 +48,10 @@ The browser session is kept locally by Chrome/Playwright:
 %USERPROFILE%\.neurogate-usage-overlay\browser-profile
 ```
 
-The last successful parsed snapshot is cached locally:
+Overlay UI state is stored locally:
 
 ```text
-%USERPROFILE%\.neurogate-usage-overlay\last-good-snapshot.json
+%USERPROFILE%\.neurogate-usage-overlay\overlay-state.json
 ```
 
 Local logs are also written under:
@@ -61,6 +61,7 @@ Local logs are also written under:
 ```
 
 These files are for the user's own machine only and must not be published.
+The app does not store old usage-limit snapshots for fallback display.
 
 ## Public Sharing Rule
 

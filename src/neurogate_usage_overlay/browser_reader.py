@@ -1,15 +1,40 @@
 from __future__ import annotations
 
-import json
+import ctypes
+import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from .models import UsageSnapshot, UsageWindow
+from .models import UsageSnapshot
 from .parser import parse_usage_text
 
 
 USAGE_URL = "https://portal.neurogate.space/client/usage"
+VISIBLE_WINDOW_ARGS = ("--window-position=96,80", "--window-size=1180,860")
+HIDDEN_WINDOW_ARGS = ("--window-position=-32000,-32000", "--window-size=1440,950")
+
+
+def _hide_windows_for_pids(process_ids: set[int]) -> int:
+    if not process_ids or not sys.platform.startswith("win"):
+        return 0
+
+    user32 = ctypes.windll.user32
+    hidden_count = 0
+
+    def callback(hwnd: int, _lparam: int) -> bool:
+        nonlocal hidden_count
+        pid = ctypes.c_ulong()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if pid.value in process_ids and user32.IsWindowVisible(hwnd):
+            user32.ShowWindow(hwnd, 0)
+            hidden_count += 1
+        return True
+
+    enum_windows_proc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+    user32.EnumWindows(enum_windows_proc(callback), 0)
+    return hidden_count
 
 
 @dataclass(slots=True)
@@ -22,7 +47,6 @@ class BrowserSettings:
     browser_channel: str = "chrome"
     timeout_ms: int = 45_000
     debug_log: Path = Path.home() / ".neurogate-usage-overlay" / "overlay-debug.log"
-    cache_file: Path = Path.home() / ".neurogate-usage-overlay" / "last-good-snapshot.json"
 
 
 class NeurogateUsageReader:
@@ -33,6 +57,7 @@ class NeurogateUsageReader:
         self._page = None
         self._current_headless: bool | None = None
         self._login_visible = False
+        self._login_prompt_opened = False
 
     def start(self) -> None:
         try:
@@ -50,12 +75,16 @@ class NeurogateUsageReader:
     def _launch_context(self, headless: bool) -> None:
         assert self._playwright is not None
         self._close_context()
+        args = self._browser_args(hidden=headless)
         self._context = self._playwright.chromium.launch_persistent_context(
             user_data_dir=str(self.settings.profile_dir),
             channel=self.settings.browser_channel,
-            headless=headless,
+            # The portal behaves differently in true headless mode and can
+            # intermittently lose tariff data. Hidden mode uses headed Chrome
+            # offscreen so the session stays equivalent to the user's browser.
+            headless=False,
             viewport={"width": 1440, "height": 950},
-            args=["--disable-blink-features=AutomationControlled"],
+            args=args,
         )
         self._current_headless = headless
         self._login_visible = False
@@ -65,6 +94,52 @@ class NeurogateUsageReader:
             self._page = self._context.new_page()
         self._page.set_default_timeout(self.settings.timeout_ms)
         self._page.goto(self.settings.usage_url, wait_until="domcontentloaded")
+        if headless:
+            self._hide_hidden_browser_taskbar_windows()
+
+    def _browser_args(self, hidden: bool) -> list[str]:
+        args = ["--disable-blink-features=AutomationControlled"]
+        if hidden:
+            args.extend(HIDDEN_WINDOW_ARGS)
+        else:
+            args.extend(VISIBLE_WINDOW_ARGS)
+        return args
+
+    def _hide_hidden_browser_taskbar_windows(self) -> int:
+        if not sys.platform.startswith("win"):
+            return 0
+        pids = self._profile_browser_process_ids()
+        if not pids:
+            return 0
+        return _hide_windows_for_pids(pids)
+
+    def _profile_browser_process_ids(self) -> set[int]:
+        if not sys.platform.startswith("win"):
+            return set()
+        needle = str(self.settings.profile_dir.resolve()).replace("'", "''").lower()
+        script = (
+            "$needle = '" + needle + "'\n"
+            "Get-CimInstance Win32_Process -Filter \"Name = 'chrome.exe'\" | "
+            "Where-Object { $_.CommandLine -and $_.CommandLine.ToLower().Contains($needle) } | "
+            "ForEach-Object { $_.ProcessId }"
+        )
+        try:
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", script],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+        except Exception:
+            return set()
+        pids: set[int] = set()
+        for line in result.stdout.splitlines():
+            try:
+                pids.add(int(line.strip()))
+            except ValueError:
+                pass
+        return pids
 
     def _close_context(self) -> None:
         if self._context:
@@ -93,10 +168,11 @@ class NeurogateUsageReader:
         if not self._playwright:
             return
         if enabled and self._current_headless is not False:
+            self._login_prompt_opened = True
             self._launch_context(headless=False)
             return
         if not enabled and self._current_headless is False:
-            self._launch_context(headless=True)
+            self._hide_current_browser_window()
 
     def read(self) -> UsageSnapshot:
         if not self._page:
@@ -106,23 +182,23 @@ class NeurogateUsageReader:
             self._page.goto(self.settings.usage_url, wait_until="domcontentloaded")
         text = self._wait_for_usage_text()
         if self._is_login_text(text) and self._current_headless and self.settings.show_browser_on_login:
-            self._open_visible_login_window()
+            self._click_login_action_if_available()
             text = self._wait_for_usage_text()
+            if self._is_login_text(text):
+                if not self._login_prompt_opened:
+                    self._open_visible_login_window()
+                    text = self._wait_for_usage_text()
         snapshot = parse_usage_text(text, source_url=self._page.url)
         if not snapshot.windows and not self._is_login_text(text):
             self._expand_usage_card(force=True)
             text = self._wait_for_usage_text()
             snapshot = parse_usage_text(text, source_url=self._page.url)
         if snapshot.has_data:
-            self._write_cache(snapshot)
             self._login_visible = False
             self._hide_visible_browser_after_success()
         else:
             self._login_visible = self._is_login_text(snapshot.raw_text) and self._current_headless is False
-            cached = self._read_cache(status_note=self._fallback_status(snapshot.raw_text))
-            if cached:
-                self._write_debug(snapshot, note="using_cached_snapshot")
-                return cached
+            snapshot.status_note = self._fallback_status(snapshot.raw_text)
         self._write_debug(snapshot)
         return snapshot
 
@@ -139,8 +215,32 @@ class NeurogateUsageReader:
 
     def _open_visible_login_window(self) -> None:
         self._write_debug(parse_usage_text("", source_url=self.settings.usage_url), note="opening_visible_login")
+        self._login_prompt_opened = True
         self._launch_context(headless=False)
         self._login_visible = True
+        try:
+            assert self._page is not None
+            self._page.bring_to_front()
+        except Exception:
+            pass
+
+    def _click_login_action_if_available(self) -> None:
+        assert self._page is not None
+        candidates = (
+            "Connect Codex",
+            "Войти",
+            "Sign in",
+            "Log in",
+        )
+        for label in candidates:
+            try:
+                button = self._page.get_by_text(label, exact=False).first
+                if button.count() > 0 and button.is_visible(timeout=600):
+                    button.click(timeout=1500)
+                    self._page.wait_for_timeout(1200)
+                    return
+            except Exception:
+                pass
 
     def _hide_visible_browser_after_success(self) -> None:
         if (
@@ -149,7 +249,13 @@ class NeurogateUsageReader:
             and self._current_headless is False
         ):
             self._write_debug(parse_usage_text("", source_url=self.settings.usage_url), note="hiding_browser_after_login")
-            self._launch_context(headless=True)
+            self._hide_current_browser_window()
+
+    def _hide_current_browser_window(self) -> int:
+        hidden_count = self._hide_hidden_browser_taskbar_windows()
+        self._current_headless = True
+        self._login_visible = False
+        return hidden_count
 
     def _wait_for_usage_text(self) -> str:
         assert self._page is not None
@@ -191,69 +297,10 @@ class NeurogateUsageReader:
         )
         self._page.wait_for_timeout(900)
 
-    def _write_cache(self, snapshot: UsageSnapshot) -> None:
-        try:
-            self.settings.cache_file.parent.mkdir(parents=True, exist_ok=True)
-            payload = {
-                "updated_at": snapshot.updated_at.isoformat(),
-                "account": snapshot.account,
-                "model_group": snapshot.model_group,
-                "total_used": snapshot.total_used,
-                "remaining": snapshot.remaining,
-                "plan_status": snapshot.plan_status,
-                "source_url": snapshot.source_url,
-                "windows": [
-                    {
-                        "title": item.title,
-                        "tokens": item.tokens,
-                        "cache": item.cache,
-                        "limit_used": item.limit_used,
-                        "limit_total": item.limit_total,
-                        "credits_remaining": item.credits_remaining,
-                        "reset_text": item.reset_text,
-                    }
-                    for item in snapshot.windows
-                ],
-            }
-            self.settings.cache_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        except Exception:
-            pass
-
     def _fallback_status(self, text: str) -> str:
         if "EMAIL" in text or "Connect Codex" in text:
             return "нужен вход"
-        return "кэш"
-
-    def _read_cache(self, status_note: str | None = None) -> UsageSnapshot | None:
-        try:
-            if not self.settings.cache_file.exists():
-                return None
-            payload = json.loads(self.settings.cache_file.read_text(encoding="utf-8"))
-            return UsageSnapshot(
-                updated_at=datetime.fromisoformat(payload["updated_at"]),
-                account=payload.get("account"),
-                model_group=payload.get("model_group"),
-                total_used=payload.get("total_used"),
-                remaining=payload.get("remaining"),
-                plan_status=payload.get("plan_status"),
-                source_url=payload.get("source_url"),
-                windows=[
-                    UsageWindow(
-                        title=item.get("title", ""),
-                        tokens=item.get("tokens"),
-                        cache=item.get("cache"),
-                        limit_used=item.get("limit_used"),
-                        limit_total=item.get("limit_total"),
-                        credits_remaining=item.get("credits_remaining"),
-                        reset_text=item.get("reset_text"),
-                    )
-                    for item in payload.get("windows", [])
-                ],
-                is_cached=True,
-                status_note=status_note or "кэш",
-            )
-        except Exception:
-            return None
+        return "нет данных"
 
     def _write_debug(self, snapshot: UsageSnapshot, note: str = "") -> None:
         try:

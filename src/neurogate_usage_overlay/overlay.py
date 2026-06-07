@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import math
+import json
 import tkinter as tk
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable
 
 from .models import UsageSnapshot, UsageWindow
-from .projection import projected_spendable_credits
 
 
 SnapshotReader = Callable[[], UsageSnapshot]
@@ -63,12 +63,14 @@ def compact_plan_status(value: str | None) -> str:
 
 
 class UsageOverlay:
-    WIDTH = 300
+    WIDTH = 222
     HEIGHT = 70
     MIN_REFRESH_SECONDS = 60
+    LOGIN_POLL_SECONDS = 2
     INTERVAL_CHOICES_MINUTES = (1, 2, 3, 5, 10, 15)
     UI_FONT = "Segoe UI Variable Small"
     TEXT_FONT = "Segoe UI Variable Text"
+    NUMBER_FONT = "Calibri Light"
 
     def __init__(
         self,
@@ -89,13 +91,14 @@ class UsageOverlay:
         self.last_snapshot: UsageSnapshot | None = None
         self.status_text = "обновление"
         self.debug_log = Path.home() / ".neurogate-usage-overlay" / "overlay-ui.log"
+        self.state_file = Path.home() / ".neurogate-usage-overlay" / "overlay-state.json"
         self.drag_x = 0
         self.drag_y = 0
         self.menu_window: tk.Toplevel | None = None
 
         self.root = tk.Tk()
-        self.root.title("NeuroGate API")
-        self.root.geometry(f"{self.WIDTH}x{self.HEIGHT}+32+72")
+        self.root.title("NeuroGate API 1.0")
+        self.root.geometry(self._initial_geometry())
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
         self.root.attributes("-alpha", 0.96)
@@ -119,6 +122,7 @@ class UsageOverlay:
     def _bind_window(self) -> None:
         self.root.bind("<ButtonPress-1>", self._start_drag)
         self.root.bind("<B1-Motion>", self._drag)
+        self.root.bind("<ButtonRelease-1>", self._end_drag)
         self.root.bind("<Button-3>", self._show_menu)
         self.root.bind("<Escape>", lambda _event: self.close())
         self.root.bind("<Control-r>", lambda _event: self.refresh(force=True))
@@ -134,17 +138,53 @@ class UsageOverlay:
         y = self.root.winfo_y() + event.y - self.drag_y
         self.root.geometry(f"+{x}+{y}")
 
+    def _end_drag(self, _event: tk.Event) -> None:
+        self._save_window_position()
+
+    def _initial_geometry(self) -> str:
+        x, y = self._load_window_position()
+        x, y = self._clamp_position(x, y, self.root.winfo_screenwidth(), self.root.winfo_screenheight())
+        return f"{self.WIDTH}x{self.HEIGHT}+{x}+{y}"
+
+    def _load_window_position(self) -> tuple[int, int]:
+        try:
+            payload = json.loads(self.state_file.read_text(encoding="utf-8"))
+            return int(payload.get("x", 32)), int(payload.get("y", 72))
+        except Exception:
+            return 32, 72
+
+    def _save_window_position(self) -> None:
+        try:
+            x, y = self._clamp_position(
+                self.root.winfo_x(),
+                self.root.winfo_y(),
+                self.root.winfo_screenwidth(),
+                self.root.winfo_screenheight(),
+            )
+            self.state_file.parent.mkdir(parents=True, exist_ok=True)
+            self.state_file.write_text(json.dumps({"x": x, "y": y}, ensure_ascii=False), encoding="utf-8")
+        except Exception as exc:  # noqa: BLE001 - position persistence must not break dragging.
+            self._write_ui_log(f"save_window_position_error {exc!r}")
+
+    def _clamp_position(self, x: int, y: int, screen_width: int, screen_height: int) -> tuple[int, int]:
+        margin = 8
+        max_x = max(margin, screen_width - self.WIDTH - margin)
+        max_y = max(margin, screen_height - self.HEIGHT - margin)
+        return max(margin, min(x, max_x)), max(margin, min(y, max_y))
+
     def _show_menu(self, event: tk.Event) -> None:
         self._hide_menu()
 
         item_height = 24
         padding = 6
-        width = 196
+        width = 160
         keep_browser_open = self._keep_browser_open()
+        keep_browser_label = "Не закрывать ЛК"
         rows: list[tuple[str, Callable[[], None] | None, bool]] = [
             ("Обновить", lambda: self.refresh(force=True), False),
+            ("", None, False),
             (
-                "☑ Не закрывать ЛК" if keep_browser_open else "☐ Не закрывать ЛК",
+                keep_browser_label,
                 self._toggle_keep_browser_open if self._has_keep_browser_toggle() else None,
                 keep_browser_open,
             ),
@@ -185,8 +225,35 @@ class UsageOverlay:
             bg_tag = f"item-bg-{index}"
             fill = "#182333" if active else "#0f151f"
             canvas.create_rectangle(4, y, width - 4, y + item_height, fill=fill, outline="", tags=(tag, bg_tag))
+            text_x = 14
+            if label == keep_browser_label:
+                text_x = 34
+                box_x = 14
+                box_y = y + 7
+                canvas.create_rectangle(
+                    box_x,
+                    box_y,
+                    box_x + 10,
+                    box_y + 10,
+                    fill="#101722",
+                    outline="#3a4656",
+                    width=1,
+                    tags=tag,
+                )
+                if active:
+                    canvas.create_line(
+                        box_x + 2,
+                        box_y + 5,
+                        box_x + 5,
+                        box_y + 8,
+                        box_x + 9,
+                        box_y + 2,
+                        fill="#76a8ff",
+                        width=2,
+                        tags=tag,
+                    )
             canvas.create_text(
-                14,
+                text_x,
                 y + item_height // 2,
                 text=label,
                 fill="#f4f7fb" if not active else "#76a8ff",
@@ -240,9 +307,6 @@ class UsageOverlay:
         if not self.keep_browser_open_setter:
             return
         enabled = not self._keep_browser_open()
-        self.status_text = "ЛК открыт" if enabled else "ЛК закрыт"
-        self._render()
-        self.root.update_idletasks()
         try:
             self.keep_browser_open_setter(enabled)
         except Exception as exc:  # noqa: BLE001 - show operational errors without crashing.
@@ -260,7 +324,7 @@ class UsageOverlay:
             self.root.after_cancel(self.after_id)
         delay_ms = self.interval_minutes * 60 * 1000
         if self.last_snapshot and not self.last_snapshot.has_data:
-            delay_ms = 15 * 1000
+            delay_ms = self.LOGIN_POLL_SECONDS * 1000
         self.after_id = self.root.after(delay_ms, self.refresh)
 
     def _rounded_rect(
@@ -333,6 +397,20 @@ class UsageOverlay:
             tags=tags,
         )
 
+    def _measure_text(self, text: str, size: int = 8, weight: str = "normal", family: str | None = None) -> int:
+        item = self.canvas.create_text(
+            -1000,
+            -1000,
+            text=text,
+            font=(family or self.TEXT_FONT, size, weight),
+            anchor="nw",
+        )
+        bbox = self.canvas.bbox(item)
+        self.canvas.delete(item)
+        if not bbox:
+            return 0
+        return bbox[2] - bbox[0]
+
     def _progress(self, x: int, y: int, width: int, percent: float | None) -> None:
         self._rounded_rect(x, y, x + width, y + 3, 2, "#242932")
         if percent is None:
@@ -359,25 +437,16 @@ class UsageOverlay:
             return "7д"
         return fallback
 
-    def _draw_limit_row(
-        self,
-        y: int,
-        fallback_label: str,
-        window: UsageWindow | None,
-        total: int | None,
-        show_total: bool = False,
-    ) -> None:
+    def _draw_limit_row(self, y: int, fallback_label: str, window: UsageWindow | None) -> None:
         label = self._compact_window_title(window, fallback_label)
         value = format_credits(window.display_value if window else None)
-        if show_total and total is not None and window and window.display_value is not None:
-            value = f"{value} / {format_credits(total)}"
         reset = compact_reset_text(window.reset_text if window else None)
 
-        self._text(10, y + 1, label, "#9aa8ba", 9, "normal", family=self.UI_FONT)
-        self._text(36, y, "остаток", "#667386", 8, "normal", family=self.UI_FONT)
-        self._text(94, y - 1, value, "#ffb86b", 11, "normal", family=self.TEXT_FONT)
-        self._text(292, y + 2, reset, "#8793a4", 8, "normal", "ne", family=self.UI_FONT)
-        self._progress(36, y + 17, 256, None)
+        self._text(9, y, label, "#9aa8ba", 9, "normal", family=self.UI_FONT)
+        self._text(31, y, "остаток", "#667386", 8, "normal", family=self.UI_FONT)
+        self._text(124, y + 8, value, "#ffb86b", 10, "bold", "center", family=self.NUMBER_FONT)
+        self._text(214, y + 2, reset, "#8793a4", 8, "normal", "ne", family=self.UI_FONT)
+        self._progress(30, y + 17, 184, None)
 
     def _render(self) -> None:
         self.canvas.delete("all")
@@ -385,34 +454,55 @@ class UsageOverlay:
         self._rounded_rect(1, 1, self.WIDTH - 1, self.HEIGHT - 1, 8, "#101722", "#182231")
 
         snapshot = self.last_snapshot
+        if snapshot and not snapshot.has_data:
+            message = snapshot.status_note or "нет данных"
+            self._text(
+                self.WIDTH // 2,
+                self.HEIGHT // 2,
+                message,
+                "#ffb86b",
+                9,
+                "bold",
+                "center",
+                family=self.UI_FONT,
+            )
+            return
+
         account = snapshot.account if snapshot and snapshot.account else "NeuroGate"
         plan_status = compact_plan_status(snapshot.plan_status if snapshot else None)
-        projected_total = projected_spendable_credits(snapshot) if snapshot else None
-        plan_x = 54 if len(account) <= 6 else 76
-        self._rounded_rect(6, 5, 158, 21, 5, "#121a26", "#25303b")
+        plan_text = plan_status or self.status_text
+        account_x = 12
+        account_width = self._measure_text(account, 8, family=self.UI_FONT)
+        plan_x = account_x + account_width + 8
+        plan_width = self._measure_text(plan_text, 8, family=self.UI_FONT)
+        left_pill_right = min(122, plan_x + plan_width + 4)
+        self._rounded_rect(6, 5, left_pill_right, 21, 5, "#161d28", "#25303b")
         self._text(12, 7, account, "#76a8ff", 8, "normal", family=self.UI_FONT)
         if plan_status:
             self._text(plan_x, 7, plan_status, "#76a8ff", 8, "normal", family=self.UI_FONT)
         else:
             self._text(plan_x, 7, self.status_text, "#697386", 8, "normal", family=self.UI_FONT)
 
-        self._rounded_rect(174, 5, 254, 21, 5, "#121821", "#25303b")
-        self._text(214, 13, self.status_text, "#697386", 8, "normal", "center", family=self.UI_FONT)
-        self._rounded_rect(262, 5, 294, 21, 5, "#161d28", "#25303b", tags="interval")
-        self._text(278, 13, f"{self.interval_minutes}м", "#9aa4b5", 8, "normal", "center", tags="interval", family=self.UI_FONT)
+        status_width = self._measure_text(self.status_text, 8, family=self.UI_FONT)
+        status_left = left_pill_right + 3
+        status_right = min(196, status_left + status_width + 8)
+        status_center = (status_left + status_right) // 2
+        self._rounded_rect(status_left, 5, status_right, 21, 5, "#161d28", "#25303b")
+        self._text(status_center, 13, self.status_text, "#697386", 8, "normal", "center", family=self.UI_FONT)
+        interval_left = status_right + 4
+        interval_right = min(self.WIDTH - 6, interval_left + 32)
+        interval_center = (interval_left + interval_right) // 2
+        self._rounded_rect(interval_left, 5, interval_right, 21, 5, "#161d28", "#25303b", tags="interval")
+        self._text(interval_center, 13, f"{self.interval_minutes}м", "#9aa4b5", 8, "normal", "center", tags="interval", family=self.UI_FONT)
 
-        self._draw_limit_row(25, "5ч", self._window_by_index(0), projected_total)
-        self._draw_limit_row(47, "7д", self._window_by_index(1), projected_total, show_total=True)
-
-        if snapshot and not snapshot.windows:
-            message = "нужен вход в NeuroGate" if not snapshot.total_used else "лимиты не раскрылись"
-            self._text(40, 38, message, "#ffb86b", 8, "normal", family=self.UI_FONT)
+        self._draw_limit_row(25, "5ч", self._window_by_index(0))
+        self._draw_limit_row(47, "7д", self._window_by_index(1))
 
     def _apply_snapshot(self, snapshot: UsageSnapshot) -> None:
         self.last_snapshot = snapshot
         self.last_refresh_at = datetime.now().astimezone()
-        if snapshot.is_cached:
-            self.status_text = snapshot.status_note or f"кэш {snapshot.updated_at.strftime('%H:%M')}"
+        if snapshot.status_note:
+            self.status_text = snapshot.status_note
         else:
             self.status_text = f"обн. {snapshot.updated_at.strftime('%H:%M')}"
         self._write_ui_log(
@@ -441,7 +531,13 @@ class UsageOverlay:
         now = datetime.now().astimezone()
         if self.refreshing:
             return
-        if not force and self.last_refresh_at and now - self.last_refresh_at < timedelta(seconds=self.MIN_REFRESH_SECONDS):
+        has_fresh_data = bool(self.last_snapshot and self.last_snapshot.has_data)
+        if (
+            not force
+            and has_fresh_data
+            and self.last_refresh_at
+            and now - self.last_refresh_at < timedelta(seconds=self.MIN_REFRESH_SECONDS)
+        ):
             self.status_text = "ждем 1 мин"
             self._render()
             self._schedule_next_refresh()
@@ -465,4 +561,5 @@ class UsageOverlay:
     def close(self) -> None:
         if self.after_id:
             self.root.after_cancel(self.after_id)
+        self._save_window_position()
         self.root.destroy()

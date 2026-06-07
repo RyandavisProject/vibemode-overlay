@@ -45,7 +45,7 @@ git commit -m "Prepare NeuroGate API for public release"
 Create a new GitHub repository, then:
 
 ```powershell
-git remote add origin https://github.com/RyandavisProject/neurogate-api.git
+git remote add origin https://github.com/RyandavisProject/neurogate-overlay.git
 git branch -M main
 git push -u origin main
 ```

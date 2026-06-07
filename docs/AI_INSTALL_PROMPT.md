@@ -6,7 +6,7 @@ run terminal commands on your Windows machine.
 ```text
 You are installing NeuroGate API from:
 
-https://github.com/RyandavisProject/neurogate-api
+https://github.com/RyandavisProject/neurogate-overlay
 
 Goal:
 Install the local Windows overlay, create a desktop shortcut, launch it, and
@@ -17,17 +17,17 @@ Rules:
 - Do not collect, print, or store credentials.
 - The user must log in directly on the NeuroGate website if Chrome
   opens a login page.
-- After login succeeds, the visible Chrome window should close automatically
-  and future overlay updates should continue in hidden mode.
+- After login succeeds, the visible Chrome window should hide automatically
+  and future overlay updates should continue from the same local browser session.
 - The right-click menu has `Не закрывать ЛК` for users who temporarily want to
-  keep the account page visible. Turning it off closes that visible window.
+  keep the account page visible. Turning it off hides that visible window.
 - Do not upload local browser profiles, cookies, logs, screenshots, or API keys.
 - Do not push to GitHub unless the user explicitly asks.
 
 Steps:
 1. If the repository is not already cloned locally, clone it:
-   git clone https://github.com/RyandavisProject/neurogate-api.git
-   cd neurogate-api
+   git clone https://github.com/RyandavisProject/neurogate-overlay.git
+   cd neurogate-overlay
 2. Inspect the repository root and confirm these files exist:
    - README.md
    - pyproject.toml
@@ -45,7 +45,7 @@ Steps:
    powershell -ExecutionPolicy Bypass -File .\scripts\run-overlay.ps1
 7. If Chrome opens a NeuroGate login page, tell the user:
    "Please log in in this Chrome window. The app does not receive your password.
-   After login, the visible browser will close and updates will continue hidden."
+   After login, the visible browser will hide and updates will continue hidden."
 8. After launch, report:
    - what was installed;
    - where the desktop shortcut is;
