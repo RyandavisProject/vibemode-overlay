@@ -96,7 +96,7 @@ class UsageOverlay:
         self.menu_window: tk.Toplevel | None = None
 
         self.root = tk.Tk()
-        self.root.title("NeuroGate API 1.2")
+        self.root.title("NeuroGate API 1.2.1")
         self.root.geometry(self._initial_geometry())
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)

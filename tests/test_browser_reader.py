@@ -107,7 +107,10 @@ class BrowserReaderModeTest(unittest.TestCase):
     def test_attach_window_progress_clamps_site_percent(self):
         reader = NeurogateUsageReader(BrowserSettings())
         reader._page = object()
-        reader._extract_window_progress = lambda: [{"percent": 1.4}, {"percent": 150}]  # type: ignore[method-assign]
+        reader._extract_window_progress = lambda: [  # type: ignore[method-assign]
+            {"title": "5 часов", "percent": 1.4},
+            {"title": "7 дней", "percent": 150},
+        ]
         snapshot = UsageSnapshot(
             updated_at=datetime.now(),
             windows=[UsageWindow(title="5 С‡Р°СЃРѕРІ"), UsageWindow(title="7 РґРЅРµР№")],
@@ -117,6 +120,37 @@ class BrowserReaderModeTest(unittest.TestCase):
 
         self.assertEqual(snapshot.windows[0].progress_percent, 1.4)
         self.assertEqual(snapshot.windows[1].progress_percent, 100.0)
+
+    def test_attach_window_progress_does_not_shift_when_first_fill_is_missing(self):
+        reader = NeurogateUsageReader(BrowserSettings())
+        reader._page = object()
+        reader._extract_window_progress = lambda: [{"title": "7 дней", "percent": 51.7}]  # type: ignore[method-assign]
+        snapshot = UsageSnapshot(
+            updated_at=datetime.now(),
+            windows=[UsageWindow(title="5 часов"), UsageWindow(title="7 дней")],
+        )
+
+        reader._attach_window_progress(snapshot)
+
+        self.assertIsNone(snapshot.windows[0].progress_percent)
+        self.assertEqual(snapshot.windows[1].progress_percent, 51.7)
+
+    def test_attach_window_progress_keeps_zero_percent_for_empty_first_bar(self):
+        reader = NeurogateUsageReader(BrowserSettings())
+        reader._page = object()
+        reader._extract_window_progress = lambda: [  # type: ignore[method-assign]
+            {"title": "5 часов", "percent": 0},
+            {"title": "7 дней", "percent": 51.7},
+        ]
+        snapshot = UsageSnapshot(
+            updated_at=datetime.now(),
+            windows=[UsageWindow(title="5 часов"), UsageWindow(title="7 дней")],
+        )
+
+        reader._attach_window_progress(snapshot)
+
+        self.assertEqual(snapshot.windows[0].progress_percent, 0.0)
+        self.assertEqual(snapshot.windows[1].progress_percent, 51.7)
 
 
 if __name__ == "__main__":

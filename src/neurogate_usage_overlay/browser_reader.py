@@ -308,12 +308,27 @@ class NeurogateUsageReader:
             return
         if not progress_items:
             return
-        for index, window in enumerate(snapshot.windows):
-            if index >= len(progress_items):
-                break
-            percent = progress_items[index].get("percent")
+        progress_by_key = {
+            self._window_progress_key(str(item.get("title", ""))): item
+            for item in progress_items
+        }
+        for window in snapshot.windows:
+            item = progress_by_key.get(self._window_progress_key(window.title))
+            if not item:
+                continue
+            percent = item.get("percent")
             if isinstance(percent, (int, float)):
                 window.progress_percent = max(0.0, min(100.0, float(percent)))
+
+    @staticmethod
+    def _window_progress_key(title: str) -> str:
+        if "5" in title:
+            return "5h"
+        if "24" in title:
+            return "24h"
+        if "7" in title:
+            return "7d"
+        return title.strip().lower()
 
     def _extract_window_progress(self) -> list[dict[str, float | str]]:
         assert self._page is not None
@@ -409,7 +424,7 @@ class NeurogateUsageReader:
                         }))
                         .filter((item) => Number.isFinite(item.percent))
                         .sort((a, b) => b.width - a.width);
-                    if (!fills.length) return null;
+                    if (!fills.length) return { title: label, percent: 0 };
                     return { title: label, percent: fills[0].percent };
                 }).filter(Boolean);
             }"""

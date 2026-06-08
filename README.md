@@ -1,4 +1,4 @@
-# NeuroGate API 1.2
+# NeuroGate API 1.2.1
 
 Небольшой Windows-оверлей для лимитов NeuroGate API.
 
