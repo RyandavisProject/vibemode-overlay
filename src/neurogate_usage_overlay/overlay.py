@@ -66,6 +66,8 @@ def compact_plan_status(value: str | None) -> str:
 class UsageOverlay:
     WIDTH = 222
     HEIGHT = 70
+    SCALE_NORMAL = 1
+    SCALE_LARGE = 2
     MIN_REFRESH_SECONDS = 60
     LOGIN_POLL_SECONDS = 2
     INTERVAL_CHOICES_MINUTES = (1, 3, 5, 10, 15, 60)
@@ -88,6 +90,7 @@ class UsageOverlay:
         self.daily_usage = DailyUsageStore(Path.home() / ".neurogate-usage-overlay" / "usage-daily.json")
         default_interval = self._normalize_interval_minutes(math.ceil(interval_seconds / 60))
         self.interval_minutes = self._load_interval_minutes(default_interval)
+        self.ui_scale = self._load_ui_scale()
         self.refreshing = False
         self.after_id: str | None = None
         self.last_refresh_at: datetime | None = None
@@ -99,7 +102,7 @@ class UsageOverlay:
         self.tooltip_window: tk.Toplevel | None = None
 
         self.root = tk.Tk()
-        self.root.title("NeuroGate API 1.3.0")
+        self.root.title("NeuroGate API 1.4.0")
         self.root.geometry(self._initial_geometry())
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
@@ -109,8 +112,8 @@ class UsageOverlay:
 
         self.canvas = tk.Canvas(
             self.root,
-            width=self.WIDTH,
-            height=self.HEIGHT,
+            width=self._scaled_width(),
+            height=self._scaled_height(),
             highlightthickness=0,
             bd=0,
             bg="#0b0d12",
@@ -146,7 +149,22 @@ class UsageOverlay:
     def _initial_geometry(self) -> str:
         x, y = self._load_window_position()
         x, y = self._clamp_position(x, y, self.root.winfo_screenwidth(), self.root.winfo_screenheight())
-        return f"{self.WIDTH}x{self.HEIGHT}+{x}+{y}"
+        return f"{self._scaled_width()}x{self._scaled_height()}+{x}+{y}"
+
+    def _current_scale(self) -> int:
+        return int(getattr(self, "ui_scale", self.SCALE_NORMAL))
+
+    def _scaled_width(self) -> int:
+        return self.WIDTH * self._current_scale()
+
+    def _scaled_height(self) -> int:
+        return self.HEIGHT * self._current_scale()
+
+    def _s(self, value: float) -> int:
+        return int(round(value * self._current_scale()))
+
+    def _font_size(self, size: int) -> int:
+        return max(1, int(round(size * self._current_scale())))
 
     def _load_state(self) -> dict[str, object]:
         try:
@@ -181,6 +199,17 @@ class UsageOverlay:
     def _save_interval_minutes(self) -> None:
         self._save_state({"interval_minutes": self.interval_minutes})
 
+    def _load_ui_scale(self) -> int:
+        try:
+            payload = self._load_state()
+            scale = int(payload.get("ui_scale", self.SCALE_NORMAL))
+            return self.SCALE_LARGE if scale == self.SCALE_LARGE else self.SCALE_NORMAL
+        except Exception:
+            return self.SCALE_NORMAL
+
+    def _save_ui_scale(self) -> None:
+        self._save_state({"ui_scale": self.ui_scale})
+
     def _save_window_position(self) -> None:
         try:
             x, y = self._clamp_position(
@@ -195,8 +224,8 @@ class UsageOverlay:
 
     def _clamp_position(self, x: int, y: int, screen_width: int, screen_height: int) -> tuple[int, int]:
         margin = 8
-        max_x = max(margin, screen_width - self.WIDTH - margin)
-        max_y = max(margin, screen_height - self.HEIGHT - margin)
+        max_x = max(margin, screen_width - self._scaled_width() - margin)
+        max_y = max(margin, screen_height - self._scaled_height() - margin)
         return max(margin, min(x, max_x)), max(margin, min(y, max_y))
 
     def _show_menu(self, event: tk.Event) -> None:
@@ -207,6 +236,8 @@ class UsageOverlay:
         width = 160
         keep_browser_open = self._keep_browser_open()
         keep_browser_label = "Не закрывать ЛК"
+        scale_label = "2x размер"
+        checkbox_labels = {keep_browser_label, scale_label}
         rows: list[tuple[str, Callable[[], None] | None, bool]] = [
             ("Обновить", lambda: self.refresh(force=True), False),
             ("", None, False),
@@ -214,6 +245,11 @@ class UsageOverlay:
                 keep_browser_label,
                 self._toggle_keep_browser_open if self._has_keep_browser_toggle() else None,
                 keep_browser_open,
+            ),
+            (
+                scale_label,
+                self._toggle_ui_scale,
+                self.ui_scale == self.SCALE_LARGE,
             ),
             ("", None, False),
             *[
@@ -253,7 +289,7 @@ class UsageOverlay:
             fill = "#182333" if active else "#0f151f"
             canvas.create_rectangle(4, y, width - 4, y + item_height, fill=fill, outline="", tags=(tag, bg_tag))
             text_x = 14
-            if label == keep_browser_label:
+            if label in checkbox_labels:
                 text_x = 34
                 box_x = 14
                 box_y = y + 7
@@ -331,12 +367,12 @@ class UsageOverlay:
             text=text,
             bg="#0f151f",
             fg="#f4f7fb",
-            font=(self.UI_FONT, 8, "normal"),
-            padx=8,
-            pady=5,
-            bd=1,
+            font=(self.UI_FONT, self._font_size(8), "normal"),
+            padx=self._s(8),
+            pady=self._s(5),
+            bd=max(1, self._s(1)),
             relief="solid",
-            highlightthickness=1,
+            highlightthickness=max(1, self._s(1)),
             highlightbackground="#303946",
         )
         label.pack()
@@ -402,6 +438,26 @@ class UsageOverlay:
             self._apply_error(exc)
             return
         self._render()
+
+    def _toggle_ui_scale(self) -> None:
+        self.ui_scale = self.SCALE_NORMAL if self.ui_scale == self.SCALE_LARGE else self.SCALE_LARGE
+        self._save_ui_scale()
+        self._hide_tooltip()
+        self._resize_window_to_scale()
+        self._render()
+
+    def _resize_window_to_scale(self) -> None:
+        width = self._scaled_width()
+        height = self._scaled_height()
+        x, y = self._clamp_position(
+            self.root.winfo_x(),
+            self.root.winfo_y(),
+            self.root.winfo_screenwidth(),
+            self.root.winfo_screenheight(),
+        )
+        self.canvas.configure(width=width, height=height)
+        self.root.geometry(f"{width}x{height}+{x}+{y}")
+        self._save_window_position()
 
     def set_interval(self, minutes: int) -> None:
         self.interval_minutes = self._normalize_interval_minutes(minutes)
@@ -475,12 +531,12 @@ class UsageOverlay:
             y1,
         ]
         self.canvas.create_polygon(
-            points,
+            [self._s(point) for point in points],
             smooth=True,
-            splinesteps=12,
+            splinesteps=12 * self._current_scale(),
             fill=fill,
             outline=outline,
-            width=width,
+            width=max(1, self._s(width)),
             tags=tags,
         )
 
@@ -497,11 +553,11 @@ class UsageOverlay:
         family: str | None = None,
     ) -> None:
         self.canvas.create_text(
-            x,
-            y,
+            self._s(x),
+            self._s(y),
             text=text,
             fill=fill,
-            font=(family or self.TEXT_FONT, size, weight),
+            font=(family or self.TEXT_FONT, self._font_size(size), weight),
             anchor=anchor,
             tags=tags,
         )
@@ -511,14 +567,14 @@ class UsageOverlay:
             -1000,
             -1000,
             text=text,
-            font=(family or self.TEXT_FONT, size, weight),
+            font=(family or self.TEXT_FONT, self._font_size(size), weight),
             anchor="nw",
         )
         bbox = self.canvas.bbox(item)
         self.canvas.delete(item)
         if not bbox:
             return 0
-        return bbox[2] - bbox[0]
+        return math.ceil((bbox[2] - bbox[0]) / self._current_scale())
 
     def _progress(self, x: int, y: int, width: int, percent: float | None) -> None:
         self._rounded_rect(x, y, x + width, y + 3, 2, "#242932")
@@ -580,7 +636,15 @@ class UsageOverlay:
 
         self._text(9, y, label, "#9aa8ba", 9, "normal", family=self.UI_FONT)
         self._text(31, y, "остаток", "#667386", 8, "normal", family=self.UI_FONT)
-        self.canvas.create_rectangle(92, y + 1, 158, y + 16, fill="#101722", outline="", tags=value_tag)
+        self.canvas.create_rectangle(
+            self._s(92),
+            self._s(y + 1),
+            self._s(158),
+            self._s(y + 16),
+            fill="#101722",
+            outline="",
+            tags=value_tag,
+        )
         self._text(124, y + 8, value, "#ffb86b", 10, "bold", "center", tags=value_tag, family=self.NUMBER_FONT)
         if tooltip:
             self.canvas.tag_bind(value_tag, "<Enter>", lambda event, text=tooltip: self._show_tooltip(event, text))

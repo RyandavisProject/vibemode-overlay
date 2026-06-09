@@ -63,6 +63,18 @@ class OverlayScheduleTest(unittest.TestCase):
             restored.state_file = overlay.state_file
             self.assertEqual(restored._load_interval_minutes(1), 60)
 
+    def test_ui_scale_is_saved_in_overlay_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            overlay = UsageOverlay.__new__(UsageOverlay)
+            overlay.state_file = Path(directory) / "overlay-state.json"
+            overlay.ui_scale = UsageOverlay.SCALE_LARGE
+
+            overlay._save_ui_scale()
+
+            restored = UsageOverlay.__new__(UsageOverlay)
+            restored.state_file = overlay.state_file
+            self.assertEqual(restored._load_ui_scale(), UsageOverlay.SCALE_LARGE)
+
     def test_window_position_save_preserves_interval(self):
         with tempfile.TemporaryDirectory() as directory:
             state_file = Path(directory) / "overlay-state.json"
@@ -88,6 +100,31 @@ class OverlayScheduleTest(unittest.TestCase):
             self.assertEqual(restored._load_interval_minutes(1), 60)
             self.assertEqual(restored._load_window_position(), (100, 120))
 
+    def test_window_position_save_preserves_scale(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_file = Path(directory) / "overlay-state.json"
+            state_file.write_text('{"ui_scale": 2}', encoding="utf-8")
+
+            overlay = UsageOverlay.__new__(UsageOverlay)
+            overlay.state_file = state_file
+            overlay.ui_scale = UsageOverlay.SCALE_LARGE
+            overlay.root = type(
+                "Root",
+                (),
+                {
+                    "winfo_x": lambda _self: 100,
+                    "winfo_y": lambda _self: 120,
+                    "winfo_screenwidth": lambda _self: 800,
+                    "winfo_screenheight": lambda _self: 600,
+                },
+            )()
+
+            overlay._save_window_position()
+
+            restored = UsageOverlay.__new__(UsageOverlay)
+            restored.state_file = state_file
+            self.assertEqual(restored._load_ui_scale(), UsageOverlay.SCALE_LARGE)
+
 
 class OverlayPositionTest(unittest.TestCase):
     def test_saved_position_is_clamped_inside_screen(self):
@@ -96,6 +133,15 @@ class OverlayPositionTest(unittest.TestCase):
         self.assertEqual(
             overlay._clamp_position(9999, -50, screen_width=800, screen_height=600),
             (800 - UsageOverlay.WIDTH - 8, 8),
+        )
+
+    def test_large_scale_position_is_clamped_inside_screen(self):
+        overlay = UsageOverlay.__new__(UsageOverlay)
+        overlay.ui_scale = UsageOverlay.SCALE_LARGE
+
+        self.assertEqual(
+            overlay._clamp_position(9999, -50, screen_width=800, screen_height=600),
+            (800 - UsageOverlay.WIDTH * 2 - 8, 8),
         )
 
 
@@ -182,7 +228,7 @@ class OverlayRenderTest(unittest.TestCase):
             self.assertEqual(overlay.canvas.itemcget(text_items[0], "text"), "нужен вход")
             self.assertEqual(
                 tuple(round(value) for value in overlay.canvas.coords(text_items[0])),
-                (UsageOverlay.WIDTH // 2, UsageOverlay.HEIGHT // 2),
+                (overlay._s(UsageOverlay.WIDTH // 2), overlay._s(UsageOverlay.HEIGHT // 2)),
             )
         finally:
             overlay.close()
