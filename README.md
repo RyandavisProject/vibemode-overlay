@@ -11,9 +11,17 @@ The main documentation is in Russian because the primary users are Russian-speak
 После входа видимое окно Chrome обычно скрывается, а данные продолжают
 обновляться из той же локальной браузерной сессии.
 
-## Скриншот
+## Скриншоты
 
 ![NeuroGate Overlay](docs/screenshots/overlay.png)
+
+Подсказка расхода:
+
+![NeuroGate Overlay Tooltip](docs/screenshots/overlay-tooltip.png)
+
+Меню настроек:
+
+![NeuroGate Overlay Menu](docs/screenshots/overlay-menu.png)
 
 ## Что показывает оверлей
 
@@ -307,6 +315,8 @@ neurogate-overlay/
     PUBLISHING.md
     screenshots/
       overlay.png
+      overlay-tooltip.png
+      overlay-menu.png
   tests/
     test_browser_reader.py
     test_overlay.py
